@@ -10,13 +10,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class BluetoothConnectionManager {
     BluetoothAdapter bluetoothAdapter;
     private ArrayList<BluetoothClientConnection> bluetoothConnections;
+
 
 
 
@@ -57,12 +62,27 @@ public class BluetoothConnectionManager {
         private Timer sendControlCodeTimer;
         private SendProbeControlCodeTimerTask sendProbeControlCodeTimerTask;
 
+        //模拟C#事件机制专用
         private ArrayList<Callback> callbacks;
+
+        //接收数据，并将数据放入MessagePacksQueue里
+        private  ReveiveMessageAsyncTask receiveMessageAsyncTask;
+
+        //处理消息队列中的数据，比如延迟处理啥的
+        private MessageBufferHandlerAsyncTask messageBufferHandlerAsyncTask;
+
+        //消息缓存队列
+        private Queue<MessagePack> messagePacksBufferQueue;
+
+        //用来防止messagePacksBufferQueue出现多线程问题的锁
+        private Lock messageBufferLock;
 
         @Override
         public ConnectionEstablishState getConnectionEstablishState() {
             return mConnectionEstablishState;
         }
+
+
 
         public BluetoothClientConnection(BluetoothDevice device, UUID uuid){
             this.device = device;
@@ -70,7 +90,8 @@ public class BluetoothConnectionManager {
             abortConnecting = false;
             callbacks = new ArrayList<>();
             sendProbeControlCodeTimerTask = new SendProbeControlCodeTimerTask();
-
+            messagePacksBufferQueue = new LinkedList<>();
+            messageBufferLock = new ReentrantLock();
             this.mConnectionEstablishState = ConnectionEstablishState.NoEstablishment;
 
         }
@@ -119,10 +140,14 @@ public class BluetoothConnectionManager {
                 callback.onConnectionEstablishResult(connection, state);
             }
         }
+        private void invokeOnReceiveMessage(IConnection connection, byte[] message){
+            for(Callback callback:callbacks){
+                callback.onReceiveMessage(connection, message);
+            }
+        }
         public void connect(){
             this.mConnectionEstablishState = ConnectionEstablishState.Connecting;
             EstablishConnectionTask establishConnectionTask = new EstablishConnectionTask();
-
             establishConnectionTask.execute();
         }
         class EstablishConnectionTask extends AsyncTask<Void, Integer, Boolean> {
@@ -153,12 +178,16 @@ public class BluetoothConnectionManager {
             @Override
             protected void onPostExecute(Boolean aBoolean) {
                 super.onPostExecute(aBoolean);
-                boolean result = aBoolean.booleanValue();
+                boolean result = aBoolean;
                 if(result){
                     mConnectionEstablishState = ConnectionEstablishState.Succeed;
                     sendControlCodeTimer = new Timer();
                     sendProbeControlCodeTimerTask = new SendProbeControlCodeTimerTask();
                     sendControlCodeTimer.schedule(sendProbeControlCodeTimerTask, 0, 500);
+                    receiveMessageAsyncTask = new ReveiveMessageAsyncTask();
+                    receiveMessageAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                    messageBufferHandlerAsyncTask = new MessageBufferHandlerAsyncTask();
+                    messageBufferHandlerAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
                     invokeOnConnectionEstablishResult(BluetoothClientConnection.this, ConnectionEstablishState.Succeed);
 
                 }else{
@@ -237,12 +266,216 @@ public class BluetoothConnectionManager {
                     outputStream.write(buffer);
                     return true;
                 }catch (IOException exception){
-                    Log.i("SendProbeControlCode", exception.getMessage());
+                    if(exception.getMessage().equals("Broken pipe") ){
+                        receiveMessageAsyncTask.cancel(true);
+                        messageBufferHandlerAsyncTask.cancel(true);
+                    }
                     return false;
                 }
             }
         }
 
-        //class SendAsyncTask extends
+        class ReveiveMessageAsyncTask extends AsyncTask<Void, MessagePack, Boolean>{
+            private final String TAG = "ReveiveMessageAsyncTask";
+
+            private boolean taskCancelled;
+
+            public ReveiveMessageAsyncTask() {
+                super();
+                taskCancelled = false;
+            }
+
+            @Override
+            protected void onPreExecute() {
+
+            }
+
+            @Override
+            protected Boolean doInBackground(Void... voids) {
+                while(true){
+                    if(isCancelled()){
+                        break;
+                    }
+                    try {
+                        byte[] rawBytes = getBytes(inputStream);
+                        MessagePack[] messagePacks = MessagePack.unpackMessages(rawBytes);
+                        publishProgress(messagePacks);
+                    }catch (Exception e){
+                        if(isCancelled()){
+                            break;
+                        }
+                        else
+                        {
+                            Log.e(TAG, e.getMessage());
+                        }
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void onProgressUpdate(MessagePack... values) {
+                super.onProgressUpdate(values);
+                for(MessagePack messagePack:values){
+                    MessagePack copyedMessagePack = messagePack.getCopy();
+                    messageBufferLock.lock();
+                    if(copyedMessagePack != null){
+                        messagePacksBufferQueue.offer(messagePack.getCopy());
+                    }else{
+                        Log.e(TAG, "（入队）没有解决的奇怪的null问题");
+                    }
+                    messageBufferLock.unlock();
+
+                }
+            }
+
+            @Override
+            protected void onCancelled(Boolean aBoolean) {
+                super.onCancelled(aBoolean);
+                try{
+                    taskCancelled = true;
+                    inputStream.close();
+                }catch (IOException e){
+                }
+            }
+
+            private byte[] getBytes(InputStream inputStream) throws IOException{
+                final int LOAD_BYTE_COUNT = 990;
+                ArrayList<byte[]> finalDataBytesArrayList = new ArrayList<>();
+                byte[] currentDataBytes;
+                boolean needNextLoad = true;
+                int totalBytesCount = 0;
+                while (needNextLoad){
+                    currentDataBytes = new byte[LOAD_BYTE_COUNT];
+                    int readByteCount = inputStream.read(currentDataBytes);
+                    if(readByteCount < LOAD_BYTE_COUNT){
+                        needNextLoad = false;
+                    }else {
+                        needNextLoad = true;
+                    }
+                    currentDataBytes = ByteUtil.getBytesRange(currentDataBytes, 0, readByteCount);
+                    finalDataBytesArrayList.add(currentDataBytes);
+                    totalBytesCount+=currentDataBytes.length;
+                }
+
+                byte[] finalBytes = new byte[totalBytesCount];
+                int currPos = 0;
+                for(int i = 0;i<finalDataBytesArrayList.size();i++){
+                    for(int j = 0;j<finalDataBytesArrayList.get(i).length;j++){
+                        finalBytes[currPos] = finalDataBytesArrayList.get(i)[j];
+                        currPos++;
+                    }
+                }
+
+                return finalBytes;
+            }
+        }
+
+        class MessageBufferHandlerAsyncTask extends AsyncTask<Void, MessagePack, Void>{
+            private final String TAG = "MessageBuffer";
+
+            public MessageBufferHandlerAsyncTask() {
+                super();
+                Log.i(TAG,"CREATE");
+            }
+
+            @Override
+            protected void onPreExecute() {
+                super.onPreExecute();
+                Log.i(TAG,"PRE");
+            }
+
+            @Override
+            protected Void doInBackground(Void... voids) {
+                while(true){
+                    messageBufferLock.lock();
+                    if(messagePacksBufferQueue.isEmpty()){
+                        if(isCancelled()){
+                            messageBufferLock.unlock();
+                            break;
+                        }
+                        messageBufferLock.unlock();
+                        continue;
+                    }
+                    MessagePack messagePack = messagePacksBufferQueue.poll();
+                    if(messagePack !=null){
+                        publishProgress(messagePack.getCopy());
+                    }else {
+                        Log.e(TAG, "（出队）没有解决的奇怪的null问题 ");
+                    }
+                    messageBufferLock.unlock();
+                }
+                return null;
+            }
+
+            @Override
+            protected void onProgressUpdate(MessagePack... values) {
+                super.onProgressUpdate(values);
+                for(MessagePack messagePack:values){
+                    invokeOnReceiveMessage(BluetoothClientConnection.this, messagePack.getMessage());
+                }
+            }
+
+            @Override
+            protected void onCancelled(Void aVoid) {
+                super.onCancelled(aVoid);
+                messageBufferLock.lock();
+                messagePacksBufferQueue.clear();
+                messageBufferLock.unlock();
+            }
+        }
+    }
+
+
+    static class MessagePack{
+        private byte[] message;
+        private int controlCode;
+
+        public MessagePack(int controlCode, byte[] message){
+            this.controlCode = controlCode;
+            this.message = message.clone();
+        }
+
+        public byte[] getMessage(){
+            return message.clone();
+        }
+        public int getControlCode(){
+            return controlCode;
+        }
+        public MessagePack getCopy(){
+            byte[] copyedMessage = message.clone();
+            return new MessagePack(controlCode, copyedMessage);
+        }
+        public static MessagePack[] unpackMessages(byte[] packedMessages){
+            ArrayList<MessagePack> unpackedMessages = new ArrayList<>();
+            int currIndex = 0;
+            while (currIndex < packedMessages.length){
+                byte[] msgControlCodeBytes = new byte[Integer.BYTES];
+                for(int i = 0;i<Integer.BYTES;i++){
+                    msgControlCodeBytes[i] = packedMessages[i+currIndex];
+                }
+                currIndex+=Integer.BYTES;
+                int controlCode = ByteUtil.getInt(msgControlCodeBytes);
+
+                byte[] msgLengthBytes = new byte[Integer.BYTES];
+                for(int i = 0;i<Integer.BYTES;i++){
+                    msgLengthBytes[i] = packedMessages[i+currIndex];
+                }
+                currIndex+=Integer.BYTES;
+                int msgLength = ByteUtil.getInt(msgLengthBytes);
+
+                byte[] message = new byte[msgLength];
+                for(int i = 0;i<msgLength;i++){
+                    message[i] = packedMessages[currIndex+i];
+                }
+                currIndex += msgLength;
+                MessagePack msgPack = new MessagePack(controlCode, message);
+                unpackedMessages.add(msgPack);
+            }
+            MessagePack[] unpackedMessagesArray = new MessagePack[unpackedMessages.size()];
+            unpackedMessages.toArray(unpackedMessagesArray);
+            return unpackedMessagesArray;
+        }
+
     }
 }
