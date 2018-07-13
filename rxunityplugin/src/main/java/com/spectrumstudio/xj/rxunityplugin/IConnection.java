@@ -3,6 +3,7 @@ package com.spectrumstudio.xj.rxunityplugin;
 public interface IConnection {
     interface Callback{
         void onConnectionEstablishResult(IConnection connection, IConnection.ConnectionEstablishState state);
+        void onReceiveMessage(IConnection connection, byte[] message);
     }
 
     enum ConnectionEstablishState { NoEstablishment ,Succeed, failed, Connecting, Abort, Disconnect}

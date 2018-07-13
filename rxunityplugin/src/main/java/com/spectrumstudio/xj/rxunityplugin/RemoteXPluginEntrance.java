@@ -2,6 +2,7 @@ package com.spectrumstudio.xj.rxunityplugin;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
+import android.util.Log;
 import android.widget.Toast;
 
 import com.unity3d.player.UnityPlayer;
@@ -9,6 +10,7 @@ import com.unity3d.player.UnityPlayer;
 import java.util.UUID;
 
 public class RemoteXPluginEntrance implements ConnectionManager.Callback{
+    private static final String TAG = "RemoteXPluginEntrance";
     private static RemoteXPluginEntrance instance;
 
     public static RemoteXPluginEntrance getInstance() {
@@ -25,15 +27,14 @@ public class RemoteXPluginEntrance implements ConnectionManager.Callback{
     private BluetoothConnectionManager bluetoothConnectionManager;
     private Activity unityPlayerActivity;
     private IRemoteXPluginCallback callback;
+    private String pluginGameObjectName;
 
     private RemoteXPluginEntrance(){
 
     }
-    public int CalculateAdd(int one, int another) {
-        return one + another;
-    }
 
-    public void initiate(final Activity unityPlayerActivity, IRemoteXPluginCallback callback){
+    public void initiate(String pluginGameObjectName ,final Activity unityPlayerActivity, IRemoteXPluginCallback callback){
+        this.pluginGameObjectName = pluginGameObjectName;
         this.unityPlayerActivity = unityPlayerActivity;
         connectionManager = new ConnectionManager();
         connectionManager.addCallback(this);
@@ -54,13 +55,9 @@ public class RemoteXPluginEntrance implements ConnectionManager.Callback{
 
     }
 
+
+
     public ConnectionManager getConnectionManager() {
-        unityPlayerActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(unityPlayerActivity,"Get ControllerManager",Toast.LENGTH_SHORT).show();
-            }
-        });
         return connectionManager;
     }
 
@@ -77,25 +74,24 @@ public class RemoteXPluginEntrance implements ConnectionManager.Callback{
             }
         });
 
+
     }
 
     @Override
-    public void onControllerConnectionReceiveMessage(IConnection connection, byte[] message) {
-
-    }
-
-    public void ArrayTest(final byte[] bytes){
-        unityPlayerActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(unityPlayerActivity, ByteUtil.getString(bytes), Toast.LENGTH_LONG).show();
-            }
-        });
-
+    public void onControllerConnectionReceiveMessage(IConnection connection, final byte[] message) {
+        //callback.onReceiveMessage(connection, new UnityByteArrayWrapper(message));
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0;i<message.length;i++){
+            sb.append(""+message[i]);
+            sb.append(',');
+        }
+        UnityPlayer.UnitySendMessage(pluginGameObjectName, "DroidOnReceiveMessageCallback", sb.toString());
     }
 
     //========Some Helper Function======================
     public boolean isSameInstance(Object o1, Object o2){
         return o1 == o2;
     }
+
+
 }

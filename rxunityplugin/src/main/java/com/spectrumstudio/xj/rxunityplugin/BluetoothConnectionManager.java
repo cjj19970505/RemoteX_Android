@@ -204,6 +204,7 @@ public class BluetoothConnectionManager {
                     tmp = device.createInsecureRfcommSocketToServiceRecord(sdpUuid);
 
                 }catch (IOException e){
+                    Log.e(TAG, "POS1:"+e.getMessage());
                     return ConnectionEstablishState.failed;
                 }
                 bluetoothSocket = tmp;
@@ -211,9 +212,11 @@ public class BluetoothConnectionManager {
                 try{
                     bluetoothSocket.connect();
                 }catch (Exception connectionException){
+                    Log.e(TAG, "POS2:"+connectionException.getMessage());
                     try{
                         bluetoothSocket.close();
                     }catch (IOException socketCloseException){
+                        Log.e(TAG, "POS3:"+socketCloseException.getMessage());
                         return ConnectionEstablishState.failed;
                     }
                     return ConnectionEstablishState.failed;
@@ -222,10 +225,12 @@ public class BluetoothConnectionManager {
                     inputStream = bluetoothSocket.getInputStream();
                     outputStream = bluetoothSocket.getOutputStream();
                 }catch (IOException streamException){
+                    Log.e(TAG, "POS4:"+streamException.getMessage());
                     try {
                         bluetoothSocket.close();
                     }
                     catch (IOException socketCloseException){
+                        Log.e(TAG, "POS5:"+socketCloseException.getMessage());
                         return ConnectionEstablishState.failed;
                     }
                 }

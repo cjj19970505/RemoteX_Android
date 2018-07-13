@@ -53,6 +53,13 @@ public class ConnectionManager implements IConnectionManager, IConnection.Callba
     }
 
     @Override
+    public void onReceiveMessage(IConnection connection, byte[] message) {
+        if(connection == controllerConnection){
+            invokeOnControllerConnectionReceiveMessage(connection, message);
+        }
+    }
+
+    @Override
     public IConnection getControllerConnection() {
         if(controllerConnection != null && (controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Abort || controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Disconnect)){
             controllerConnection = null;

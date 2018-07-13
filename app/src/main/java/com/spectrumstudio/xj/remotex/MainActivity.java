@@ -1,6 +1,7 @@
 package com.spectrumstudio.xj.remotex;
 
 import android.bluetooth.BluetoothDevice;
+import android.content.Intent;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -8,6 +9,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
 
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 import com.spectrumstudio.xj.rxunityplugin.BluetoothConnectionManager;
 import com.spectrumstudio.xj.rxunityplugin.ConnectionManager;
 import com.spectrumstudio.xj.rxunityplugin.IConnection;
@@ -23,6 +26,7 @@ public class MainActivity extends AppCompatActivity implements ConnectionManager
 
     Button btn_Connect;
     Button btn_Abort;
+    Button btn_Scan;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +56,27 @@ public class MainActivity extends AppCompatActivity implements ConnectionManager
                 connection.abortConnecting();
             }
         });
+        btn_Scan = (Button)findViewById(R.id.btn_Scan);
+        btn_Scan.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                new IntentIntegrator(MainActivity.this).initiateScan();
+            }
+        });
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if(result != null) {
+            if(result.getContents() == null) {
+                Toast.makeText(this, "Cancelled", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Scanned: " + result.getContents(), Toast.LENGTH_LONG).show();
+            }
+        } else {
+            super.onActivityResult(requestCode, resultCode, data);
+        }
     }
 
     @Override
@@ -67,6 +92,10 @@ public class MainActivity extends AppCompatActivity implements ConnectionManager
 
     @Override
     public void onControllerConnectionReceiveMessage(IConnection connection, byte[] message) {
-
+        StringBuilder sb = new StringBuilder();
+        for(int i=0;i<message.length;i++){
+            sb.append("(byte)("+(int)(message[i])+")"+", ");
+        }
+        Log.i(TAG, sb.toString());
     }
 }
