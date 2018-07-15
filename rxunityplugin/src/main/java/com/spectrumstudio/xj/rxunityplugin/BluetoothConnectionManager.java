@@ -36,8 +36,10 @@ public class BluetoothConnectionManager {
     }
 
     public BluetoothClientConnection createRfcommClientConnection(BluetoothDevice device, UUID uuid){
+
         BluetoothClientConnection clientConnection = new BluetoothClientConnection(device, uuid);
         bluetoothConnections.add(clientConnection);
+        Log.i("GameLog", "CreatingRfcommClient");
         return clientConnection;
     }
 
@@ -51,6 +53,7 @@ public class BluetoothConnectionManager {
 
 
     private class BluetoothClientConnection implements IConnection{
+
         private BluetoothDevice device;
         private UUID sdpUuid;
         private ConnectionEstablishState mConnectionEstablishState;
@@ -82,7 +85,9 @@ public class BluetoothConnectionManager {
             return mConnectionEstablishState;
         }
 
-
+        public int getConnectionEstablishStateCode() {
+            return mConnectionEstablishState.getStateCode();
+        }
 
         public BluetoothClientConnection(BluetoothDevice device, UUID uuid){
             this.device = device;
@@ -92,7 +97,7 @@ public class BluetoothConnectionManager {
             sendProbeControlCodeTimerTask = new SendProbeControlCodeTimerTask();
             messagePacksBufferQueue = new LinkedList<>();
             messageBufferLock = new ReentrantLock();
-            this.mConnectionEstablishState = ConnectionEstablishState.NoEstablishment;
+            this.mConnectionEstablishState = ConnectionEstablishState.Created;
 
         }
 
@@ -146,10 +151,27 @@ public class BluetoothConnectionManager {
             }
         }
         public void connect(){
+
             this.mConnectionEstablishState = ConnectionEstablishState.Connecting;
             EstablishConnectionTask establishConnectionTask = new EstablishConnectionTask();
             establishConnectionTask.execute();
+            Log.i("GameLog", "connecting");
         }
+
+        @Override
+        public void cancel() {
+            try
+            {
+                receiveMessageAsyncTask.cancel(true);
+                bluetoothSocket.close();
+            } catch (IOException socketCloseException){
+                Log.e("GameLog", socketCloseException.getMessage());
+            } finally {
+                this.mConnectionEstablishState = ConnectionEstablishState.Cancelled;
+                invokeOnConnectionEstablishResult(this, ConnectionEstablishState.Cancelled);
+            }
+        }
+
         class EstablishConnectionTask extends AsyncTask<Void, Integer, Boolean> {
             private final String TAG = "EstablishConnectionTask";
 
@@ -165,7 +187,7 @@ public class BluetoothConnectionManager {
                 ConnectionEstablishState state;
                 do {
                     state = establishConnection();
-                }while (state == ConnectionEstablishState.failed && !abortConnecting);
+                }while (state == ConnectionEstablishState.Failed && !abortConnecting);
 
                 if(abortConnecting){
                     return false;
@@ -180,7 +202,7 @@ public class BluetoothConnectionManager {
                 super.onPostExecute(aBoolean);
                 boolean result = aBoolean;
                 if(result){
-                    mConnectionEstablishState = ConnectionEstablishState.Succeed;
+                    mConnectionEstablishState = ConnectionEstablishState.Succeeded;
                     sendControlCodeTimer = new Timer();
                     sendProbeControlCodeTimerTask = new SendProbeControlCodeTimerTask();
                     sendControlCodeTimer.schedule(sendProbeControlCodeTimerTask, 0, 500);
@@ -188,7 +210,7 @@ public class BluetoothConnectionManager {
                     receiveMessageAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
                     messageBufferHandlerAsyncTask = new MessageBufferHandlerAsyncTask();
                     messageBufferHandlerAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-                    invokeOnConnectionEstablishResult(BluetoothClientConnection.this, ConnectionEstablishState.Succeed);
+                    invokeOnConnectionEstablishResult(BluetoothClientConnection.this, ConnectionEstablishState.Succeeded);
 
                 }else{
                     mConnectionEstablishState = ConnectionEstablishState.Abort;
@@ -205,7 +227,7 @@ public class BluetoothConnectionManager {
 
                 }catch (IOException e){
                     Log.e(TAG, "POS1:"+e.getMessage());
-                    return ConnectionEstablishState.failed;
+                    return ConnectionEstablishState.Failed;
                 }
                 bluetoothSocket = tmp;
                 bluetoothAdapter.cancelDiscovery();
@@ -217,9 +239,9 @@ public class BluetoothConnectionManager {
                         bluetoothSocket.close();
                     }catch (IOException socketCloseException){
                         Log.e(TAG, "POS3:"+socketCloseException.getMessage());
-                        return ConnectionEstablishState.failed;
+                        return ConnectionEstablishState.Failed;
                     }
-                    return ConnectionEstablishState.failed;
+                    return ConnectionEstablishState.Failed;
                 }
                 try{
                     inputStream = bluetoothSocket.getInputStream();
@@ -231,10 +253,10 @@ public class BluetoothConnectionManager {
                     }
                     catch (IOException socketCloseException){
                         Log.e(TAG, "POS5:"+socketCloseException.getMessage());
-                        return ConnectionEstablishState.failed;
+                        return ConnectionEstablishState.Failed;
                     }
                 }
-                return ConnectionEstablishState.Succeed;
+                return ConnectionEstablishState.Succeeded;
             }
         }
 

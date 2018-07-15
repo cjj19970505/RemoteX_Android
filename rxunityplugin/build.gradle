@@ -26,4 +26,5 @@ android {
 
 dependencies {
     implementation files('libs/classes.jar')
+    implementation 'com.journeyapps:zxing-android-embedded:3.6.0'
 }

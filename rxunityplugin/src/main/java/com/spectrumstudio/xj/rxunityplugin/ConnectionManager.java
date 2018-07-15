@@ -61,7 +61,7 @@ public class ConnectionManager implements IConnectionManager, IConnection.Callba
 
     @Override
     public IConnection getControllerConnection() {
-        if(controllerConnection != null && (controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Abort || controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Disconnect)){
+        if(controllerConnection != null && (controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Abort || controllerConnection.getConnectionEstablishState()== IConnection.ConnectionEstablishState.Disconnected)){
             controllerConnection = null;
         }
 

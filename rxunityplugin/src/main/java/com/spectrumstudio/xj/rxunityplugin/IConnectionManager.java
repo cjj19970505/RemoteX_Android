@@ -11,5 +11,4 @@ public interface IConnectionManager {
     IConnection getControllerConnection();
     void setControllerConnection(IConnection connection);
 
-
 }
